@@ -159,7 +159,7 @@ import DrawSignature from "../components/DrawSignature.vue";
 import html2pdf from "html2pdf.js";
 import Loader from "@/components/utils/Loader.vue";
 
-import pdf from "html-pdf";
+// import pdf from "html-pdf";
 
 const store = useDataStore();
 const { currentFiles, results, signature, rawFiles } = storeToRefs(store);
@@ -199,65 +199,68 @@ const blobToArrayBuffer = (blob) => {
 };
 
 const updateCoords = (arg) => {
-  console.log(arg);
+  // console.log(arg);
   signatureProps.value.x = arg.x;
   signatureProps.value.y = arg.y;
-  // getCurrentPage(arg.x, arg.y);
-  const container = document.getElementById("pdfContainer");
 
   determineCurrentPage(arg.y);
 };
 
 const savePDF = async () => {
-  console.log("Pdf buffer conent", pdfBufferContent.value);
-  let pdfContent;
-  if (fileExt.value !== "pdf") {
-    if (pdfBufferContent.value instanceof Blob)
-      pdfContent = await blobToArrayBuffer(pdfBufferContent.value);
-  } else {
-    const file = currentFiles.value[selectedFileIndex];
-    const arrayBuffer = await file.arrayBuffer();
-    pdfContent = arrayBuffer;
+  try {
+    // console.log("Pdf buffer conent", pdfBufferContent.value);
+    let pdfContent;
+    if (fileExt.value !== "pdf") {
+      if (pdfBufferContent.value instanceof Blob)
+        pdfContent = await blobToArrayBuffer(pdfBufferContent.value);
+    } else {
+      const file = currentFiles.value[selectedFileIndex];
+      const arrayBuffer = await file.arrayBuffer();
+      pdfContent = arrayBuffer;
+    }
+    const pdfDoc = await PDFDocument.load(pdfContent);
+    const pages = pdfDoc.getPages();
+    const page =
+      currentPage.value < 1 ? pages[0] : pages[currentPage.value - 1];
+    const form = pdfDoc.getForm();
+    // console.log("FOrms", form.getFields());
+    if (signature.value) {
+      const signatureBytes = await pdfDoc.embedPng(signature.value);
+
+      let newY;
+      if (signatureProps.value.y >= page.getHeight()) {
+        newY =
+          signatureProps.value.y - page.getHeight() * (currentPage.value - 1);
+        // console.log("New y: ", newY);
+      } else newY = signatureProps.value.y;
+      const adjustedX = signatureProps.value.x;
+      const adjustedY = page.getHeight() - newY - signatureProps.value.h;
+
+      page.drawImage(signatureBytes, {
+        width: signatureProps.value.w,
+        height: signatureProps.value.h,
+        x: adjustedX,
+
+        y: adjustedY,
+      });
+
+      // console.log("First page", page);
+    }
+
+    const pdfBytes = await pdfDoc.save();
+    // Create a Blob from the Uint8Array
+    const blob = new Blob([pdfBytes], { type: "application/pdf" });
+
+    // Create a download URL for the Blob
+    downloadURL.value = URL.createObjectURL(blob);
+    const container = document.getElementById("pdfContainer");
+    while (container.firstChild) {
+      container.removeChild(container.firstChild);
+    }
+    await renderPDF(pdfBytes);
+  } catch (error) {
+    console.error(error);
   }
-  const pdfDoc = await PDFDocument.load(pdfContent);
-  const pages = pdfDoc.getPages();
-  const page = currentPage.value < 1 ? pages[0] : pages[currentPage.value - 1];
-  const form = pdfDoc.getForm();
-  console.log("FOrms", form.getFields());
-  if (signature.value) {
-    const signatureBytes = await pdfDoc.embedPng(signature.value);
-
-    let newY;
-    if (signatureProps.value.y >= page.getHeight()) {
-      newY =
-        signatureProps.value.y - page.getHeight() * (currentPage.value - 1);
-      console.log("New y: ", newY);
-    } else newY = signatureProps.value.y;
-    const adjustedX = signatureProps.value.x;
-    const adjustedY = page.getHeight() - newY - signatureProps.value.h;
-
-    page.drawImage(signatureBytes, {
-      width: signatureProps.value.w,
-      height: signatureProps.value.h,
-      x: adjustedX,
-
-      y: adjustedY,
-    });
-
-    console.log("First page", page);
-  }
-
-  const pdfBytes = await pdfDoc.save();
-  // Create a Blob from the Uint8Array
-  const blob = new Blob([pdfBytes], { type: "application/pdf" });
-
-  // Create a download URL for the Blob
-  downloadURL.value = URL.createObjectURL(blob);
-  const container = document.getElementById("pdfContainer");
-  while (container.firstChild) {
-    container.removeChild(container.firstChild);
-  }
-  await renderPDF(pdfBytes);
 };
 
 const downloadPDF = () => {
@@ -277,7 +280,7 @@ const setupSignature = async () => {
   showSignature.value = true;
   signatureProps.value.y = window.scrollY;
   const signatureCanvas = canvasRef.value;
-  console.log("Current Y", window.scrollY);
+  // console.log("Current Y", window.scrollY);
   signatureCanvas.style.width = signatureProps.value.w;
   signatureCanvas.style.height = signatureProps.value.h;
   const signaturePad = new SignaturePad(signatureCanvas, {
@@ -290,68 +293,69 @@ const setupSignature = async () => {
 
 const initRender = async () => {
   loadingDocument.value = true;
-  store.signature = null;
-  // Load the PDF worker
-  const file = currentFiles.value[selectedFileIndex];
-  const pdfWorkerPath = await import("pdfjs-dist/build/pdf.worker.entry");
+  try {
+    store.signature = null;
+    // Load the PDF worker
+    const file = currentFiles.value[selectedFileIndex];
+    const pdfWorkerPath = await import("pdfjs-dist/build/pdf.worker.entry");
 
-  GlobalWorkerOptions.workerSrc = pdfWorkerPath.default;
+    GlobalWorkerOptions.workerSrc = pdfWorkerPath.default;
 
-  // Read the PDF data from the file
-  const arrayBuffer = await file.arrayBuffer();
-  const pdfData = new Uint8Array(arrayBuffer);
+    // Read the PDF data from the file
+    const arrayBuffer = await file.arrayBuffer();
+    const pdfData = new Uint8Array(arrayBuffer);
 
-  // Read the PDF data from the file
-  if (fileExt.value !== "pdf") {
-    await convertToPdf(arrayBuffer);
-    return;
-  } else {
-    pdfBufferContent.value = arrayBufferToBlob(pdfData);
-    renderPDF(pdfData);
+    // Read the PDF data from the file
+    if (fileExt.value !== "pdf") {
+      await convertToPdf(arrayBuffer);
+      return;
+    } else {
+      pdfBufferContent.value = arrayBufferToBlob(pdfData);
+      renderPDF(pdfData);
+    }
+  } catch (error) {
+    console.error(error);
   }
 };
 
 const renderPDF = async (pdfData) => {
   loadingDocument.value = true;
-  // Load the PDF document
-  pdfDocument.value = await PDFDocument.load(new Uint8Array(pdfData));
-  const pdfDoc = await getDocument(pdfData).promise;
-  // Get the total number of pages in the document
-  const numPages = pdfDoc.numPages;
+  try {
+    // Load the PDF document
+    pdfDocument.value = await PDFDocument.load(new Uint8Array(pdfData));
+    const pdfDoc = await getDocument(pdfData).promise;
+    // Get the total number of pages in the document
+    const numPages = pdfDoc.numPages;
 
-  // Iterate over all pages
-  for (let pageNumber = 1; pageNumber <= numPages; pageNumber++) {
-    const page = await pdfDoc.getPage(pageNumber);
-    const viewport = page.getViewport({ scale: 1 });
-    const canvas = document.createElement("canvas");
-    let scaledViewport = viewport;
-    // if (viewport.width > window.innerWidth) {
-    //   const scale = window.innerWidth / viewport.width;
-    //   scaledViewport = page.getViewport({ scale });
-    //   canvas.width = scaledViewport.width;
-    //   canvas.height = scaledViewport.height;
-    // } else {
-    canvas.width = viewport.width;
-    canvas.height = viewport.height;
-    // }
-    canvas.id = `page${pageNumber}`;
-    canvas.className = "page";
-    const context = canvas.getContext("2d");
-    const renderContext = {
-      canvasContext: context,
-      viewport: scaledViewport,
-    };
-    await page.render(renderContext);
+    // Iterate over all pages
+    for (let pageNumber = 1; pageNumber <= numPages; pageNumber++) {
+      const page = await pdfDoc.getPage(pageNumber);
+      const viewport = page.getViewport({ scale: 1 });
+      const canvas = document.createElement("canvas");
+      let scaledViewport = viewport;
 
-    // Access the canvas element for each page
-    console.log(canvas);
+      canvas.width = viewport.width;
+      canvas.height = viewport.height;
 
-    // Append the canvas to your desired container
-    const container = document.getElementById("pdfContainer");
+      canvas.id = `page${pageNumber}`;
+      canvas.className = "page";
+      const context = canvas.getContext("2d");
+      const renderContext = {
+        canvasContext: context,
+        viewport: scaledViewport,
+      };
+      await page.render(renderContext);
 
-    container.appendChild(canvas);
+      // Append the canvas to your desired container
+      const container = document.getElementById("pdfContainer");
+
+      container.appendChild(canvas);
+    }
+    loadingDocument.value = false;
+  } catch (error) {
+    loadingDocument.value = false;
+    console.error(error);
   }
-  loadingDocument.value = false;
 };
 const convertToPdf = async (docxArrayBuffer) => {
   try {
@@ -447,7 +451,7 @@ onMounted(async () => {
       .toLowerCase();
 
     if (results.value[selectedFileIndex]) {
-      initRender();
+      await initRender();
     }
   } else {
     useRouter().push("/addDocument");

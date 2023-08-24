@@ -88,10 +88,26 @@ export default {
     };
   },
   methods: {
+    async readFileAsync(file) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = (event) => {
+          const uint8Array = new Uint8Array(event.target.result);
+          const decoder = new TextDecoder("utf-8");
+          const fileData = decoder.decode(uint8Array);
+          resolve(fileData);
+        };
+        reader.onerror = (event) => {
+          reject(event.error);
+        };
+        reader.readAsArrayBuffer(file);
+      });
+    },
     async handleFileUpload(event, index) {
       let files = [...event.target.files];
       const reader = new FileReader();
       const store = useDataStore();
+      let results = [];
       store.currentFiles = files;
       store.rawFiles = files.map((file) => {
         return {
@@ -100,20 +116,14 @@ export default {
         };
       });
 
-      await Promise.resolve(() => {
-        for (let idx = 0; idx < files.length; idx++) {
-          const file = files[idx];
-          console.log("File", file);
-          reader.onload = (event) => {
-            const uint8Array = new Uint8Array(event.target.result);
-            // const fileData = String.fromCharCode.apply(null, uint8Array);
-            const decoder = new TextDecoder("utf-8");
-            const fileData = decoder.decode(uint8Array);
-            store.results[idx] = fileData;
-          };
-          reader.readAsArrayBuffer(file);
-        }
-      });
+      for (let idx = 0; idx < files.length; idx++) {
+        const file = files[idx];
+        console.log("File", file);
+        const fileData = await this.readFileAsync(file);
+        results[idx] = fileData;
+      }
+
+      store.results = results;
       this.$router.push(this.sidebarItems[index].route);
     },
   },
